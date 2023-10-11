@@ -126,7 +126,7 @@ func (s *SocksL) handleConnection(conn net.Conn) error {
 }
 
 func (s *SocksL) listenForData(socketID int, conn net.Conn) {
-	buffer := make([]byte, 1024)
+	buffer := make([]byte, 4096)
 	for {
 		n, err := conn.Read(buffer)
 		if err != nil {
