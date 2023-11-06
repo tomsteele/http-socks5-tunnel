@@ -21,6 +21,21 @@ $ go build
 $ ./client
 ```
 
+**Probably review the usage for both**
+```
+Usage of client:
+  -api string
+    	api server URL (default "http://127.0.0.1:1081/jobs")
+  -host string
+    	Host header to be applied to every request
+  -key string
+    	AES-256 key as 64 hex characters. (default "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+  -timeout int
+    	milliseconds to wait between polling for jobs (default 500)
+  -ua string
+    	user-agent to use (default "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36")
+```
+
 
 **Use the socks5 listener**
 ```

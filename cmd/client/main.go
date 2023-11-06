@@ -23,6 +23,7 @@ type Client struct {
 	apiURL  string
 	key     []byte
 	timeout int
+	httpc   *http.Client
 }
 
 func (c *Client) StartWorker() {
@@ -76,7 +77,7 @@ func (c *Client) StartWorker() {
 }
 
 func (c *Client) getJob() (command.Job, error) {
-	resp, err := http.Get(c.apiURL)
+	resp, err := c.httpc.Get(c.apiURL)
 	if err != nil {
 		return command.Job{}, err
 	}
@@ -106,7 +107,7 @@ func (c *Client) sendJob(job command.Job) error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.Post(c.apiURL, "application/json", bytes.NewBuffer(data))
+	resp, err := c.httpc.Post(c.apiURL, "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		return err
 	}
@@ -128,8 +129,24 @@ func parseKey(hexKey string) ([]byte, error) {
 	return key, nil
 }
 
+type customRoundTripper struct {
+	HostHeader string
+	UserAgent  string
+	Transport  http.RoundTripper
+}
+
+func (t *customRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.Header.Set("User-Agent", t.UserAgent)
+	if t.HostHeader != "" {
+		req.Host = t.HostHeader
+	}
+	return t.Transport.RoundTrip(req)
+}
+
 func main() {
 	apiURL := flag.String("api", "http://127.0.0.1:1081/jobs", "api server URL")
+	hostHeader := flag.String("host", "", "Host header to be applied to every request")
+	userAgent := flag.String("ua", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36", "user-agent to use")
 	timeout := flag.Int("timeout", 500, "milliseconds to wait between polling for jobs")
 	defaultHexKey := "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 	hexKey := flag.String("key", defaultHexKey, "AES-256 key as 64 hex characters.")
@@ -141,11 +158,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	transport := customRoundTripper{
+		UserAgent:  *userAgent,
+		HostHeader: *hostHeader,
+		Transport:  http.DefaultTransport,
+	}
+
+	httpc := http.Client{
+		Transport: &transport,
+	}
+
 	client := Client{
 		apiURL:  *apiURL,
 		sockets: make(map[int]net.Conn),
 		key:     key,
 		timeout: *timeout,
+		httpc:   &httpc,
 	}
 	client.StartWorker()
 }
