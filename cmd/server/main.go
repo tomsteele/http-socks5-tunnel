@@ -84,22 +84,22 @@ func (s *SocksL) handleConnection(conn net.Conn) error {
 	case 0x01:
 		ipv4 := make([]byte, 4)
 		port := make([]byte, 2)
-		_, err = io.ReadFull(conn, ipv4)
-		_, err = io.ReadFull(conn, port)
+		_, _ = io.ReadFull(conn, ipv4)
+		_, _ = io.ReadFull(conn, port)
 		addr = fmt.Sprintf("%d.%d.%d.%d:%d", ipv4[0], ipv4[1], ipv4[2], ipv4[3], binary.BigEndian.Uint16(port))
 	case 0x03:
 		length := make([]byte, 1)
-		_, err = io.ReadFull(conn, length)
+		_, _ = io.ReadFull(conn, length)
 		domain := make([]byte, length[0])
 		port := make([]byte, 2)
-		_, err = io.ReadFull(conn, domain)
-		_, err = io.ReadFull(conn, port)
+		_, _ = io.ReadFull(conn, domain)
+		_, _ = io.ReadFull(conn, port)
 		addr = fmt.Sprintf("%s:%d", domain, binary.BigEndian.Uint16(port))
 	case 0x04:
 		ipv6 := make([]byte, 16)
 		port := make([]byte, 2)
-		_, err = io.ReadFull(conn, ipv6)
-		_, err = io.ReadFull(conn, port)
+		_, _ = io.ReadFull(conn, ipv6)
+		_, _ = io.ReadFull(conn, port)
 		addr = fmt.Sprintf("[%x%x:%x%x:%x%x:%x%x:%x%x:%x%x:%x%x:%x%x]:%d", ipv6[0], ipv6[1], ipv6[2], ipv6[3], ipv6[4], ipv6[5], ipv6[6], ipv6[7], ipv6[8], ipv6[9], ipv6[10], ipv6[11], ipv6[12], ipv6[13], ipv6[14], ipv6[15], binary.BigEndian.Uint16(port))
 	default:
 		conn.Write([]byte{0x05, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00})
@@ -126,23 +126,33 @@ func (s *SocksL) handleConnection(conn net.Conn) error {
 }
 
 func (s *SocksL) listenForData(socketID int, conn net.Conn) {
-	buffer := make([]byte, 4096)
 	for {
+		buffer := make([]byte, 4096)
 		n, err := conn.Read(buffer)
 		if err != nil {
 			if err != io.EOF {
 				fmt.Printf("read error on socket %s\n", err.Error())
 			}
 			conn.Close()
+			s.lock.Lock()
 			delete(s.db, socketID)
+			s.lock.Unlock()
+			job := command.Job{
+				Command:  command.COMMAND_CLOSE,
+				SocketID: socketID,
+				Data:     []byte{},
+			}
+			s.queue <- job
 			break
 		}
-		job := command.Job{
-			Command:  command.COMMAND_TX,
-			SocketID: socketID,
-			Data:     buffer[:n],
+		if n > 0 {
+			job := command.Job{
+				Command:  command.COMMAND_TX,
+				SocketID: socketID,
+				Data:     buffer[:n],
+			}
+			s.queue <- job
 		}
-		s.queue <- job
 	}
 }
 
@@ -171,14 +181,25 @@ func (s *SocksL) jobs(c *gin.Context) {
 				return
 			}
 			// Write data to the socket
+			fmt.Printf("writing %d to %d\n", len(job.Data), job.SocketID)
 			_, err := conn.conn.Write(job.Data)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write data to socket"})
 				return
 			}
 		}
-		// Add the job to the queue for other types of commands as well.
-		s.queue <- job
+		if job.Command == command.COMMAND_CLOSE {
+			// Retrieve the connection based on the SocketID
+			conn, ok := s.db[job.SocketID]
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid socket_id"})
+				return
+			}
+			conn.conn.Close()
+			s.lock.Lock()
+			delete(s.db, job.SocketID)
+			s.lock.Unlock()
+		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 
 	case http.MethodGet:

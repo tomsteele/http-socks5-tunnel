@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -29,22 +28,26 @@ type Client struct {
 func (c *Client) StartWorker() {
 	for {
 		job, err := c.getJob()
-		// getJob() is going to error a lot.
+		// This is going to error a lot and is safe to ignore. You may have to fiddle with timeouts.
 		if err != nil {
 			// Adjust as needed.
 			time.Sleep(time.Duration(c.timeout) * time.Millisecond)
 			continue
 		}
 		switch job.Command {
+		// Connect to the address and create a new socket.
 		case command.COMMAND_CONNECT:
 			conn, err := net.Dial("tcp", job.Addr)
 			if err != nil {
 				fmt.Println("Error connecting to address:", err)
 				continue
 			}
+			// Locking here incase we want to increase the amount of workers in the future.
 			c.lock.Lock()
 			c.sockets[job.SocketID] = conn
 			c.lock.Unlock()
+			// Now that we have a connection it is ok to start processing the reads in another grooutine.
+			go c.rx(conn, job)
 
 		case command.COMMAND_TX:
 			conn, ok := c.sockets[job.SocketID]
@@ -57,13 +60,35 @@ func (c *Client) StartWorker() {
 				fmt.Printf("error writing to socket: %s\n", err.Error())
 				continue
 			}
-
-			buff := make([]byte, 4096)
-			n, err := conn.Read(buff)
-			if err != nil && err != io.EOF {
-				fmt.Printf("error reading from socket: %s\n", err.Error())
+		// This is important. Applications needs to know when the socket is closed.
+		case command.COMMAND_CLOSE:
+			conn, ok := c.sockets[job.SocketID]
+			if !ok {
+				fmt.Printf("invalid socket id for COMMAND_CLOSE. socket_id: %d\n", job.SocketID)
 				continue
 			}
+			conn.Close()
+			c.lock.Lock()
+			delete(c.sockets, job.SocketID)
+			c.lock.Unlock()
+		}
+	}
+}
+
+func (c *Client) rx(conn net.Conn, job command.Job) {
+	for {
+		buff := make([]byte, 4096)
+		n, err := conn.Read(buff)
+		if err != nil {
+			rxJob := command.Job{
+				Command:  command.COMMAND_CLOSE,
+				SocketID: job.SocketID,
+				Data:     []byte{},
+			}
+			c.sendJob(rxJob)
+			break
+		}
+		if n > 0 {
 			rxJob := command.Job{
 				Command:  command.COMMAND_RX,
 				SocketID: job.SocketID,
