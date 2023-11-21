@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -26,14 +27,22 @@ type Client struct {
 }
 
 func (c *Client) StartWorker() {
+	modifiedTimeout := c.timeout
+	stepTimeout := 500
+	maxTimeout := 15000
 	for {
 		job, err := c.getJob()
 		// This is going to error a lot and is safe to ignore. You may have to fiddle with timeouts.
 		if err != nil {
 			// Adjust as needed.
-			time.Sleep(time.Duration(c.timeout) * time.Millisecond)
+			jitter := rand.Intn(300)
+			time.Sleep(time.Duration(modifiedTimeout+jitter) * time.Millisecond)
+			if modifiedTimeout < maxTimeout {
+				modifiedTimeout += stepTimeout
+			}
 			continue
 		}
+		modifiedTimeout = c.timeout
 		switch job.Command {
 		// Connect to the address and create a new socket.
 		case command.COMMAND_CONNECT:
