@@ -181,7 +181,6 @@ func (s *SocksL) jobs(c *gin.Context) {
 				return
 			}
 			// Write data to the socket
-			fmt.Printf("writing %d to %d\n", len(job.Data), job.SocketID)
 			_, err := conn.conn.Write(job.Data)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write data to socket"})
